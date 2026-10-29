@@ -47,7 +47,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key>
   <string>$VERSION</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.4.0</string>
+  <string>0.5.0</string>
   <key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>
