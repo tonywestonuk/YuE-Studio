@@ -67,6 +67,14 @@ struct Song: Identifiable, Equatable {
         }
     }
 
+    /// The generation request the worker saved beside the song (style, lyrics, cot, seed, abc, abc_open,
+    /// cfg_scale, id), for reusing its materials in the form. Nil when the folder has no request.json.
+    func request() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent("request.json")) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+    var hasRequest: Bool { FileManager.default.fileExists(atPath: directory.appendingPathComponent("request.json").path) }
+
     /// Songs on disk under the output folder: <run>/song<N>/ with audio.flac (ready) or only saved
     /// tokens (stalled: can be synthesized later) plus their sidecar files.
     nonisolated static func scan(_ root: URL) -> [Song] {

@@ -14,5 +14,12 @@ struct YuEStudioApp: App {
                     Button("Repair Installation…") { backend.quit(); installer.repair() }.disabled(!Paths.packaged)
                 }
             }
+        // Settings… (Cmd-,): where the model weights live, e.g. an external SSD.
+        Settings {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Storage").font(.headline)
+                ModelsFolderView(relaunchNote: true)   // re-checked on the next launch: a missing download starts the installer
+            }.padding(20).frame(width: 560)
+        }
     }
 }
