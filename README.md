@@ -21,7 +21,9 @@ This project has been listed in [awesome-YuE](https://github.com/RevolutionLA/aw
   full quality" reuses the same tokens and seed at 32 steps on the Neural Engine.
 - **Instrumental switch** for songs without vocals.
 - **First-run installer**: a private Python runtime, this package, and the model weights (about
-  7 GB), installed once under Application Support.
+  7 GB), installed once under Application Support. The weights can live elsewhere, such as an
+  external SSD: choose the folder on the installer screen or later in Settings (Cmd-,), which
+  offers to move already downloaded models there.
 
 **Requirements.** A Mac with Apple Silicon and macOS 14 or later; 32 GB of memory is
 comfortable, 16 GB works (the worker adapts). About 10 GB of disk.

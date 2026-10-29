@@ -321,9 +321,27 @@ struct ContentView: View {
             } else if song.quality == "draft" && song.status == .ready {
                 Button("Render full quality") { players.forget(song); backend.render(song, engine: "auto", quality: "full", engines: engines) }.disabled(!backend.connected)
             }
+            Button("Reuse") { reuse(song) }.disabled(!song.hasRequest).help("Put this song's title, style, lyrics, seed and score back into the form")
             if !song.score.isEmpty { Button("Score") { showScore = song } }
             Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: song.path)]) }.disabled(song.status != .ready)
         }.padding(.vertical, 2)
+    }
+
+    /// Puts a song's saved materials (its request.json) back into the form so it can be varied.
+    private func reuse(_ song: Song) {
+        guard let request = song.request() else { return }
+        if var s = request["style"] as? String {
+            // The worker prefixes the style with its instrumental tags; the flag itself is not saved.
+            let tags = "Instrumental, no vocals, no singing, "
+            if s.hasPrefix(tags) { s = String(s.dropFirst(tags.count)); instrumental = true }
+            style = s
+        }
+        if let l = request["lyrics"] as? String { lyrics = l; lyricsVersion += 1 }
+        if let c = request["cot"] as? String { cot = c }
+        if let n = request["seed"] as? Int { seed = n; randomSeed = false }
+        abc = request["abc"] as? String ?? ""
+        abcOpen = !abc.isEmpty && (request["abc_open"] as? Bool ?? false)
+        title = song.title; titleAuto = ""
     }
 
     /// A grab bar under a text editor: drag down to make it taller; the height persists.
