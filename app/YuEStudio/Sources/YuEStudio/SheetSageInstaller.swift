@@ -27,8 +27,26 @@ final class SheetSageInstaller: ObservableObject {
         let fm = FileManager.default
         guard Paths.packaged else { state = fm.fileExists(atPath: Paths.sheetsagePython.path) ? .ready : .needed; return }
         let marker = (try? JSONSerialization.jsonObject(with: Data(contentsOf: Paths.sheetsageMarker)) as? [String: String])?["recipe"]
-        let modelPresent = fm.fileExists(atPath: Paths.models.appendingPathComponent("hub/models--m-a-p--SheetSage2").path)
-        state = (marker == Self.recipe && fm.fileExists(atPath: Paths.sheetsagePython.path) && modelPresent) ? .ready : .needed
+        state = (marker == Self.recipe && fm.fileExists(atPath: Paths.sheetsagePython.path) && Self.modelPresent()) ? .ready : .needed
+    }
+
+    /// SheetSage2 is complete only with its MERT-v2 backbone cached at the revision its
+    /// config.json pins: the model's remote code resolves the parent at that revision alone,
+    /// so an install that fetched MERT's `main` after it moved on (September 2026) cannot
+    /// load offline (issues #8, #11) and is reinstalled, which now pulls the pinned revision.
+    static func modelPresent() -> Bool {
+        let fm = FileManager.default
+        let hub = Paths.models.appendingPathComponent("hub")
+        let snapshots = hub.appendingPathComponent("models--m-a-p--SheetSage2/snapshots")
+        guard let dirs = try? fm.contentsOfDirectory(at: snapshots, includingPropertiesForKeys: nil) else { return false }
+        return dirs.contains { snapshot in
+            guard let data = try? Data(contentsOf: snapshot.appendingPathComponent("config.json")),
+                  let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let parent = config["base_model_name_or_path"] as? String, !parent.isEmpty,
+                  let revision = config["base_model_revision"] as? String, !revision.isEmpty else { return false }
+            let parentDir = "models--" + parent.replacingOccurrences(of: "/", with: "--")
+            return fm.fileExists(atPath: hub.appendingPathComponent("\(parentDir)/snapshots/\(revision)/model.safetensors").path)
+        }
     }
 
     func append(_ message: String) {
@@ -51,9 +69,10 @@ final class SheetSageInstaller: ObservableObject {
             do {
                 try await step(0) { try await self.run(uv, ["python", "install", "3.11"], env) }
                 try await step(1) {
-                    // The main env is guaranteed installed by now; its download script takes repo args.
+                    // The main env is guaranteed installed by now; its download script takes repo args
+                    // and follows SheetSage2's config.json to the MERT-v2 backbone at the revision it pins.
                     try await self.run(Paths.python.path, [Paths.src.appendingPathComponent("tools/download_models.py").path,
-                                                          "m-a-p/SheetSage2", "m-a-p/MERT-v2-FullSong"], env) { [weak self] line in
+                                                          "m-a-p/SheetSage2"], env) { [weak self] line in
                         guard let p = downloadProgress(line) else { return }
                         Task { @MainActor in
                             guard let self else { return }

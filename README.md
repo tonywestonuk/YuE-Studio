@@ -274,6 +274,8 @@ To reproduce the reported benchmark scores, follow the instructions on [🤗 Wil
 
 [Demo and results](https://map-yue2.github.io/#sheetsage2) · [🤗 Model and inference](https://huggingface.co/m-a-p/SheetSage2)
 
+**Troubleshooting.** A transcription failing with `OSError: We couldn't connect to 'https://huggingface.co' … m-a-p/MERT-v2-FullSong is not the path to a directory containing a file named configuration_mert2.py` means the install has a newer MERT-v2 snapshot than the revision SheetSage2 pins (MERT's `main` moved on after SheetSage2 was published). YuE Studio 0.4.1 downloads the pinned backbone revision (`tools/download_models.py` follows SheetSage2's `config.json` to it) and the transcribe tool fetches it on first use when it is missing; on an older install, reinstall SheetSage2 from the app or run `python tools/download_models.py m-a-p/SheetSage2` with `HF_HOME` pointed at the models directory.
+
 ## Hum a melody
 
 In YuE Studio, open "ABC score" in the form and press **Hum a melody…**: record 10 to 30 seconds
