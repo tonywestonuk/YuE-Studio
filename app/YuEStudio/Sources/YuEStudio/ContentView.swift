@@ -136,7 +136,7 @@ struct ContentView: View {
                 Text(useRemote ? (backend.remoteStatus.isEmpty ? remote.detail : backend.remoteStatus) : "off").font(.caption).foregroundStyle(.secondary)
                 Toggle("Instrumental (no vocals)", isOn: $instrumental)
                 if instrumental {
-                    Text("Adds no-vocal tags, keeps only the section markers of the lyrics, and silences the vocal voice in the planned score before the song is tokenized. Planning is used even if set to off.").font(.caption).foregroundStyle(.secondary)
+                    Text("Adds no-vocal tags, keeps only the section markers of the lyrics, and silences the vocal voice in the planned score before the song is tokenized. Planning is used even if set to off. A supplied ABC score has its vocal voice silenced too.").font(.caption).foregroundStyle(.secondary)
                 }
                 HStack { Text("Max length"); Slider(value: $maxSeconds, in: 30...360, step: 10); Text("\(Int(maxSeconds)) s").monospacedDigit().frame(width: 44) }
                 HStack {

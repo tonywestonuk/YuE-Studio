@@ -4,6 +4,10 @@ The token model follows the planned score far more closely than the style tags, 
 "instrumental, no vocals" alone still produce a singer. Replacing every note of the Vocal voice with
 rests (keeping its chord symbols and the instrumental voice untouched) removes the sung melody
 while leaving the harmony and arrangement in place.
+
+Planned scores name their voices ``Vocal`` and ``Ins``; a supplied score (a transcription or a
+pasted file) may name its single voice anything, so that voice is silenced when there is no
+``Vocal``. A multi-voice score with no ``Vocal`` voice is left unchanged.
 """
 from __future__ import annotations
 import re
@@ -22,8 +26,32 @@ def instrumental_tags(style: str) -> str:
     return style if "instrumental" in style.lower() else f"{TAGS}, {style}"
 
 
-def silence_vocals(abc: str, voice_name: str = "Vocal") -> str:
-    """Every bar of ``voice_name`` becomes its chord symbols followed by a whole-bar rest."""
+def voice_names(abc: str) -> list[str]:
+    """The voices of a score in order of first appearance (``V:`` headers and body lines)."""
+    names = []
+    for line in abc.splitlines():
+        m = re.match(r"V:\s*(\S+)", line)
+        if m and m.group(1) not in names:
+            names.append(m.group(1))
+    return names
+
+
+def silenced_voice(abc: str) -> str | None:
+    """The voice ``silence_vocals`` silences: ``Vocal`` if the score has one, the only voice of a
+    single-voice score, else None (nothing can be silenced safely)."""
+    names = voice_names(abc)
+    if "Vocal" in names:
+        return "Vocal"
+    return names[0] if len(names) == 1 else None
+
+
+def silence_vocals(abc: str, voice_name: str | None = None) -> str:
+    """Every bar of ``voice_name`` (default: ``silenced_voice(abc)``) becomes its chord symbols
+    followed by a whole-bar rest. The score is returned unchanged if there is no such voice."""
+    if voice_name is None:
+        voice_name = silenced_voice(abc)
+    if voice_name is None or voice_name not in voice_names(abc):
+        return abc
     meter, unit = (4, 4), 8
     out, voice = [], None
     for line in abc.splitlines():
