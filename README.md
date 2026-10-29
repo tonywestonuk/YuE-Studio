@@ -9,6 +9,9 @@ weights and its licence are theirs, and the app downloads the weights from Huggi
 launch. What this repository adds is the app, the pipeline that keeps the GPU and the Neural
 Engine busy at the same time, and the engines that make the model run well on Apple Silicon.
 
+
+This project has been listed in [awesome-YuE](https://github.com/RevolutionLA/awesome-YuE). 
+
 ## The app
 
 - **Queue songs and watch them move** through Planning, Tokenizing, Synthing and Rendering, with
