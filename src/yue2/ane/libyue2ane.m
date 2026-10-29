@@ -27,8 +27,25 @@ static int ensure(char *err, int errlen) {
     if (!gDesc || !gIMM || !gReq || !gSurf) { snprintf(err, errlen, "private ANE classes missing"); gDesc = nil; return -1; }
     return 0;
 }
+// The whole error, including its chain of underlying errors (NSUnderlyingErrorKey, recursively):
+// the compiler's actual reason, e.g. com.apple.appleneuralengine.compiler Code=22 "Compiler internal
+// error: Couldn't do topological sort", is one or two levels below the error that the API returns.
+// Python logs the text as it is; the buffer sizes in runtime.py allow for it.
 static void seterr(char *err, int errlen, NSError *e, const char *what) {
-    snprintf(err, errlen, "%s: %s", what, [[e description] UTF8String] ?: "unknown");
+    @autoreleasepool {
+        NSMutableString *s = [NSMutableString stringWithFormat:@"%s: %@", what, e ? [e description] : @"unknown error"];
+        NSError *u = e;
+        for (int depth = 0; depth < 8; depth++) {
+            id next = u.userInfo[NSUnderlyingErrorKey];
+            if (![next isKindOfClass:[NSError class]]) break;
+            u = next;
+            [s appendFormat:@"\n  caused by: %@ Code=%ld \"%@\"", u.domain, (long)u.code, u.localizedDescription];
+            NSString *reason = u.userInfo[NSLocalizedFailureReasonErrorKey];
+            if ([reason isKindOfClass:[NSString class]] && ![reason isEqualToString:u.localizedDescription])
+                [s appendFormat:@" (%@)", reason];
+        }
+        snprintf(err, errlen, "%s", [s UTF8String] ?: "unknown error");
+    }
 }
 
 ane_surface *ane_surface_create(size_t bytes) {

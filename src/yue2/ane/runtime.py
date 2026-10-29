@@ -17,6 +17,9 @@ LIB = Path(os.environ.get("YUE2_ANE_LIB", Path(__file__).with_name("libyue2ane.d
 CACHE = Path(os.environ.get("YUE2_ANE_CACHE", Path.home() / ".cache" / "yue2-ane"))
 S_STEP, P_STEP = 512, 1024
 QBLK, KCHUNK = int(os.environ.get("YUE2_ANE_QBLK", 1024)), int(os.environ.get("YUE2_ANE_KCHUNK", 2048))
+# Room for the bridge's error text: an NSError description plus its chain of underlying errors
+# (the compiler's reason for a rejection is in there), written whole so the app's log can show it.
+ERR_BYTES = 8192
 MAX_RESIDENT = int(os.environ.get("YUE2_ANE_RESIDENT", 28))
 LAYER_LIMIT = int(os.environ.get("YUE2_ANE_LAYERS", 0))      # diagnostics: run only the first N layers
 LAYERS_PER_PROGRAM = int(os.environ.get("YUE2_ANE_GROUP", 2))  # layers per program call
@@ -122,7 +125,7 @@ class Program:
         """Compile the program; load=False leaves it unloaded (no engine mappings) until reload()."""
         self.lib = Lib.get().lib
         self.inputs = input_names(directory)
-        err = ctypes.create_string_buffer(4096)
+        err = ctypes.create_string_buffer(ERR_BYTES)
         seconds = ctypes.c_double(0)
         if os.environ.get("YUE2_ANE_FAIL_COMPILE"):          # test hook: behave like a compiler rejection
             raise RuntimeError("compile: simulated ANECCompile() FAILED")
@@ -134,7 +137,7 @@ class Program:
 
     def __call__(self, inputs, outputs):
         """inputs: {name: Surface} bound in the program's declared order; outputs: [Surface]."""
-        err = ctypes.create_string_buffer(4096)
+        err = ctypes.create_string_buffer(ERR_BYTES)
         ordered = [inputs[name] for name in self.inputs]
         ins = (ctypes.c_void_p * len(ordered))(*[s.handle for s in ordered])
         outs = (ctypes.c_void_p * len(outputs))(*[s.handle for s in outputs])
@@ -142,13 +145,13 @@ class Program:
             raise RuntimeError(err.value.decode(errors="replace"))
 
     def unload(self):
-        err = ctypes.create_string_buffer(1024)
+        err = ctypes.create_string_buffer(ERR_BYTES)
         if self.lib.ane_program_unload(self.handle, err, len(err)):
             raise RuntimeError(err.value.decode(errors="replace"))
         self.resident = False
 
     def reload(self):
-        err = ctypes.create_string_buffer(1024)
+        err = ctypes.create_string_buffer(ERR_BYTES)
         if self.lib.ane_program_reload(self.handle, err, len(err)):
             raise RuntimeError(err.value.decode(errors="replace"))
         self.resident = True

@@ -91,6 +91,26 @@ Measured on the 20 s example song: velocity correlation 0.99974 with PyTorch,
 latent correlation 0.9999 with the legacy path, 387 ms per pass, 25 s per
 solve (PyTorch 47 s, legacy 60 s).
 
+### If the Neural Engine compiler fails on your Mac
+
+The compiler rejects some shapes on some machines (reported on an M5 Max with
+macOS 27: `Error Domain=com.apple.appleneuralengine.compiler Code=22 "Compiler
+internal error: Couldn't do topological sort"`). When it does, the app falls
+back to the GPU for that song by itself: the song row says "waiting for the
+GPU", and the log pane carries the complete compiler error under a "Neural
+Engine compiler said:" line (the one-line summary beside it shows only the
+first line). Nothing is retried automatically.
+
+When running from source, the attention tiling can be changed through the
+environment before the worker (or `yue2 generate`) starts: `YUE2_ANE_QBLK`
+(query rows per block, default 1024) and `YUE2_ANE_KCHUNK` (keys per chunk,
+default 2048). Setting `YUE2_ANE_KCHUNK=16384` made the failing shapes compile
+on that M5 Max, because a key chunk that covers the whole bucket removes the
+multi-chunk streaming attention from the program; the same programs then ran
+about 8x slower on its Neural Engine than its GPU path, so this is a
+diagnostic, not a recommended setting, and the GPU fallback remains the
+default.
+
 ## Native app
 
 `app/YuEStudio` is a SwiftUI macOS app (`swift build -c release`, then run

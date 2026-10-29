@@ -77,6 +77,24 @@ def log(message):
     emit(event="log", message=message, time=dt.datetime.now().strftime("%H:%M:%S"))
 
 
+def brief(exc, limit=100):
+    """The first line of an error, cut short, for a status line or a one-line log message."""
+    lines = str(exc).strip().splitlines()
+    return lines[0][:limit] if lines else type(exc).__name__
+
+
+def log_full_error(what, exc):
+    """The complete text of an error for the log pane, when the one-line summary left part of it
+    out. The Neural Engine compiler's real reason (for example its
+    'Error Domain=com.apple.appleneuralengine.compiler Code=22 "Compiler internal error: Couldn't
+    do topological sort"') is in the underlying error on a later line; the pane keeps newlines,
+    so continuation lines are indented under the heading."""
+    text = str(exc).strip()
+    lines = text.splitlines()
+    if len(lines) > 1 or len(text) > 100:
+        log(f"{what}:\n" + "\n".join("    " + line for line in lines))
+
+
 def pipeline():
     """The loaded pipeline (loading or reloading the model as needed). Call under MODEL_LOCK."""
     global PIPE
@@ -662,7 +680,8 @@ def precompile(song, model, why):
                     log(f"Background: Neural Engine programs for {song.label} ready in {time.perf_counter() - t0:.0f} s")
             except Exception as exc:
                 song.program_failed = True
-                log(f"{song.label}: the Neural Engine cannot compile its program ({str(exc).splitlines()[0][:100]})")
+                log(f"{song.label}: the Neural Engine cannot compile its program ({brief(exc)})")
+                log_full_error("Neural Engine compiler said", exc)
             finally:
                 song.program_ready.set()
                 SCHED.tick()
@@ -702,7 +721,8 @@ def run_ane(song):
             if not str(exc).startswith("compile"):
                 raise
             # The compiler rejects some very large shapes; the song goes back to wait for the GPU.
-            log(f"The Neural Engine cannot compile programs for {song.label} ({str(exc).splitlines()[0][:100]}); it will use the GPU")
+            log(f"The Neural Engine cannot compile programs for {song.label} ({brief(exc)}); it will use the GPU")
+            log_full_error("Neural Engine compiler said", exc)
             song.wants_ane = False; song.program_failed = True
             with SCHED.cv:
                 SCHED.ane_synth = None; SCHED.ane_prefill = False
@@ -757,7 +777,8 @@ def run_remote(song):
             latents = synthesize(model, song.plan.prefix, song.codec, song.seed, engine="remote", remote=client,
                                  offload_ar=pipe.offload_ar, **kwargs)
         except (RemoteError, OSError) as exc:
-            reason = str(exc).splitlines()[0][:120]
+            reason = brief(exc, 120)                  # the song row and the remote status show this line
+            log_full_error(f"{client.label()} said", exc)
             if isinstance(exc, OSError) or "closed the connection" in reason:
                 clear_remote(reason)
             else:
