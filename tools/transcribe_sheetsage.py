@@ -12,7 +12,8 @@ JSON object per line on stdout so the app worker can forward progress verbatim:
 
 Audio is decoded with macOS's own afconvert and handed to the model as a raw
 waveform, so no FFmpeg install is needed.  Standalone: no imports outside the
-standard library until the model actually loads.
+standard library until the model's cache is checked (huggingface_hub) and it
+actually loads (torch, transformers).
 """
 
 import argparse
@@ -79,6 +80,66 @@ class DecodeError(Exception):
     pass
 
 
+class BackboneError(Exception):
+    pass
+
+
+def pinned_backbone(model):
+    """(parent, revision) SheetSage2's cached config.json pins, or None when not cached/pinned."""
+    from huggingface_hub import hf_hub_download
+    try:
+        config = json.loads(Path(hf_hub_download(model, "config.json", local_files_only=True)).read_text(encoding="utf-8"))
+    except Exception:
+        return None        # nothing cached yet: an online load fetches everything itself
+    parent, revision = config.get("base_model_name_or_path"), config.get("base_model_revision")
+    if isinstance(parent, str) and isinstance(revision, str) and parent and revision and not Path(parent).is_dir():
+        return parent, revision
+    return None
+
+
+def ensure_backbone(model):
+    """Make sure the MERT-v2 backbone is cached at the revision SheetSage2 pins.
+
+    SheetSage2's remote code resolves its parent at ``base_model_revision`` only.  An
+    install that fetched the parent's ``main`` after that branch moved on has a newer
+    snapshot the pinned lookup cannot use, and offline loads then fail with
+    "We couldn't connect to huggingface.co ... configuration_mert2.py" (issues #8, #11).
+    Fetches the pinned revision even under --offline; raises BackboneError if it cannot.
+    """
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.constants import HF_HUB_CACHE
+    pinned = pinned_backbone(model)
+    if pinned is None:
+        return
+    parent, revision = pinned
+    try:
+        snapshot_download(parent, revision=revision, local_files_only=True)
+        return
+    except Exception:
+        pass
+    detail = "downloading the MERT-v2 backbone revision SheetSage2 pins (about 1.3 GB)"
+    say(stage="progress", fraction=0.03, detail=detail)
+    started = time.time()
+    finished = threading.Event()
+
+    def heartbeat():
+        while not finished.wait(5):
+            elapsed = int(time.time() - started)
+            say(stage="progress", detail=f"{detail} · {elapsed // 60}:{elapsed % 60:02d} elapsed")
+
+    threading.Thread(target=heartbeat, daemon=True).start()
+    try:
+        snapshot_download(parent, revision=revision)
+    except Exception as exc:
+        raise BackboneError(
+            f"SheetSage2 needs {parent} at revision {revision}, which is missing from {HF_HUB_CACHE} "
+            f"and could not be downloaded ({type(exc).__name__}: {exc}). "
+            "Reinstall SheetSage2 from the app (Transcribe), or run "
+            f"tools/download_models.py {model} with HF_HOME pointed at the models directory.") from exc
+    finally:
+        finished.set()
+
+
 def run(args):
     if not args.audio.is_file():
         fail("crash", f"no such file: {args.audio}")
@@ -93,7 +154,13 @@ def run(args):
         fail("afconvert", str(exc), output)
         return 3
 
-    say(stage="progress", fraction=0.02, detail="loading SheetSage2")
+    try:
+        ensure_backbone(args.model)
+    except BackboneError as exc:
+        fail("crash", str(exc), output)
+        return 2
+
+    say(stage="progress", fraction=0.04, detail="loading SheetSage2")
     import numpy as np
     import soundfile
     import torch
