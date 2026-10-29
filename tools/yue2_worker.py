@@ -95,6 +95,21 @@ def log_full_error(what, exc):
         log(f"{what}:\n" + "\n".join("    " + line for line in lines))
 
 
+def silenced_request(request, abc, source):
+    """The request to tokenize an instrumental song from: ``abc`` (the song's planned or supplied
+    score) with its vocal voice silenced, or None, with a warning logged, when the score has no
+    voice that can be silenced (then the song proceeds with its vocals, rather than failing)."""
+    import dataclasses
+    from yue2.instrumental import silence_vocals, silenced_voice
+    voice = silenced_voice(abc)
+    if voice is None:
+        log(f"Instrumental: the {source} score has no Vocal voice; vocals could not be silenced")
+        return None
+    log(f"Instrumental: vocal voice silenced in the {source} score" if voice == "Vocal"
+        else f"Instrumental: voice {voice!r} silenced in the {source} score (it has no Vocal voice)")
+    return dataclasses.replace(request, abc=silence_vocals(abc, voice), abc_open=False)
+
+
 def pipeline():
     """The loaded pipeline (loading or reloading the model as needed). Call under MODEL_LOCK."""
     global PIPE
@@ -579,14 +594,17 @@ def run_batch(batch):
             plans = [SymbolicPlan(r, tokenizer.decode(ids), ids, token_prefixes(r, tokenizer, ids), t, trunc)
                      for r, (ids, t, trunc) in zip(requests, rows)]
             log(f"Scores planned: {[len(p.abc_ids) for p in plans]} tokens in {timing['seconds']:.0f} s")
-            if any(s.instrumental for s in songs):
-                # Re-plan from each score with its vocal voice silenced: the tokens then carry no sung melody.
-                from yue2.instrumental import silence_vocals
-                plans = [pipe.plan(request=dataclasses.replace(p.request, abc=silence_vocals(p.abc), abc_open=False)) if (s.instrumental and p.abc) else p
-                         for s, p in zip(songs, plans)]
-                log("Instrumental: vocal voice silenced in the planned score(s)")
+            # Instrumental: re-plan from the score with its vocal voice silenced, so the tokens carry no sung melody.
+            for i, (s, p) in enumerate(zip(songs, plans)):
+                if s.instrumental and p.abc and (r := silenced_request(p.request, p.abc, "planned")) is not None:
+                    plans[i] = pipe.plan(request=r)
         else:
-            plans = [pipe.plan(request=r) for r in requests]
+            # A supplied score (pasted or transcribed) skips planning, so its vocal voice is silenced here.
+            plans = []
+            for s, r in zip(songs, requests):
+                if s.instrumental and r.abc:
+                    r = silenced_request(r, r.abc, "supplied") or r
+                plans.append(pipe.plan(request=r))
         counts[:] = [0] * n
         for s in songs:
             s.set_state(TOKENIZING, "generating song tokens")
