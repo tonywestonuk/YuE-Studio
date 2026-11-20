@@ -28,6 +28,17 @@ LAYERS_PER_PROGRAM = int(os.environ.get("YUE2_ANE_GROUP", 2))  # layers per prog
 # engine only holds one program's working arena. YUE2_ANE_WEIGHT_POOL=n keeps only n layers' weight
 # surfaces mapped (rewritten before each call) instead of all 28 (~2.8 GB) — a memory fallback.
 WEIGHT_POOL = int(os.environ.get("YUE2_ANE_WEIGHT_POOL", 0))
+# Programs are compiled in this process by calling ANECompiler.framework directly (ANECCompile) and the
+# resulting model.hwx is kept on disk beside the MIL, keyed by engine generation and OS build; later
+# launches load it in ~0.1 s. The compiler service route (YUE2_ANE_INPROCESS=0) ignores compiler
+# options, serialises every compile on the machine, and keeps nothing across launches. These flags
+# skip the compiler's L2 memcache planner, CP allocation and a few global searches: on our graphs the
+# program is bit-identical in output and speed, and the 4-minute bucket compiles in 15 s instead of 45.
+INPROCESS = os.environ.get("YUE2_ANE_INPROCESS", "1") != "0"
+DEFAULT_COMPILER_FLAGS = {"DisableCpAllocation": True, "MemCacheStrategy": "None", "SpatialSplit": "Auto",
+                          "DisableL2BankConflictOpt": True, "EnableGlobalCWOptimization": False,
+                          "UseWideWorkUnits": True, "EnableL2BatchSplitting": False}
+COMPILER_FLAGS = json.loads(os.environ["YUE2_ANE_COMPILER_FLAGS"]) if os.environ.get("YUE2_ANE_COMPILER_FLAGS") else DEFAULT_COMPILER_FLAGS
 
 
 def physical_memory_gib():
@@ -40,6 +51,12 @@ def physical_memory_gib():
 # Compiled programs of buckets other than the one in use are kept (compiled, unloaded) so a
 # batch of songs of different lengths never recompiles; on small machines they are freed instead.
 KEEP_BUCKETS = int(os.environ.get("YUE2_ANE_KEEP_BUCKETS", 8 if physical_memory_gib() >= 24 else 1))
+
+
+def log_fallback(message):
+    """Stderr note for the worker's log: the Neural Engine path changed route."""
+    import sys
+    print(f"[ane] {message}", file=sys.stderr, flush=True)
 
 
 def bucket(n, step):
@@ -71,6 +88,12 @@ class Lib:
         lib.ane_program_load.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_double), ctypes.c_char_p, ctypes.c_int]
         lib.ane_program_compile.restype = ctypes.c_void_p
         lib.ane_program_compile.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.c_char_p, ctypes.c_int]
+        lib.ane_program_open.restype = ctypes.c_void_p
+        lib.ane_program_open.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.c_char_p, ctypes.c_int]
+        lib.ane_compile_hwx.restype = ctypes.c_int
+        lib.ane_compile_hwx.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_double), ctypes.c_char_p, ctypes.c_int]
+        lib.ane_program_tag.restype = ctypes.c_int
+        lib.ane_program_tag.argtypes = [ctypes.c_char_p, ctypes.c_int]
         lib.ane_program_eval.restype = ctypes.c_int
         lib.ane_program_eval.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int,
                                          ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
@@ -120,20 +143,83 @@ def input_names(directory):
     return [m.group(1) for m in re.finditer(r">\s*(\w+)\s*(?:,|$)", sig)]
 
 
+_TAG = [None]
+
+
+def program_tag():
+    """'h16g-25F84': engine generation and OS build; a model.hwx is only reused under the same tag."""
+    if _TAG[0] is None:
+        buf = ctypes.create_string_buffer(256)
+        if Lib.get().lib.ane_program_tag(buf, len(buf)):
+            raise RuntimeError(buf.value.decode(errors="replace"))
+        _TAG[0] = buf.value.decode()
+    return _TAG[0]
+
+
+def hwx_path(directory):
+    """Where this program's compiled binary lives for this machine (None when compiling in-process is off)."""
+    return Path(directory) / f"hwx-{program_tag()}" / "model.hwx" if INPROCESS else None
+
+
+def compile_hwx(directory, hwx, flags=None):
+    """Compile directory/model.mil to ``hwx`` in this process; returns the compile seconds."""
+    lib = Lib.get().lib
+    err = ctypes.create_string_buffer(ERR_BYTES)
+    seconds = ctypes.c_double(0)
+    flags = COMPILER_FLAGS if flags is None else flags
+    rc = lib.ane_compile_hwx(str(directory).encode(), str(Path(hwx).parent).encode(), json.dumps(flags).encode(),
+                             ctypes.byref(seconds), err, len(err))
+    if rc:
+        raise RuntimeError(err.value.decode(errors="replace"))
+    (Path(hwx).parent / "flags.json").write_text(json.dumps(flags, indent=1))
+    return seconds.value
+
+
 class Program:
     def __init__(self, directory, load=True):
-        """Compile the program; load=False leaves it unloaded (no engine mappings) until reload()."""
+        """Open the program, compiling it first when no model.hwx exists for this machine;
+        load=False leaves it unloaded (no engine mappings) until reload()."""
         self.lib = Lib.get().lib
         self.inputs = input_names(directory)
-        err = ctypes.create_string_buffer(ERR_BYTES)
-        seconds = ctypes.c_double(0)
         if os.environ.get("YUE2_ANE_FAIL_COMPILE"):          # test hook: behave like a compiler rejection
             raise RuntimeError("compile: simulated ANECCompile() FAILED")
-        self.handle = self.lib.ane_program_compile(str(directory).encode(), 1 if load else 0, ctypes.byref(seconds), err, len(err))
+        self.compile_seconds, self.route = 0.0, "service"
+        hwx = hwx_path(directory)
+        if hwx is not None:
+            if hwx.exists():
+                self.route = "cached"
+            else:
+                try:
+                    self.compile_seconds, self.route = compile_hwx(directory, hwx), "in-process"
+                except RuntimeError as exc:
+                    log_fallback(f"in-process compile failed ({exc}); using the compiler service")
+                    hwx = None
+        self.handle = self._open(directory, hwx, load)
+        if not self.handle and hwx is not None:
+            # A model.hwx the engine will not load (an older compiler's, say): compile it again.
+            log_fallback(f"{hwx} did not load ({self.error}); recompiling")
+            hwx.unlink(missing_ok=True)
+            try:
+                self.compile_seconds, self.route = compile_hwx(directory, hwx), "in-process"
+                self.handle = self._open(directory, hwx, load)
+            except RuntimeError as exc:
+                log_fallback(f"in-process compile failed ({exc}); using the compiler service")
+            if not self.handle:
+                self.route = "service"
+                self.handle = self._open(directory, None, load)
         if not self.handle:
-            raise RuntimeError(err.value.decode(errors="replace"))
-        self.compile_seconds = seconds.value
+            raise RuntimeError(self.error)
         self.resident = bool(load)
+
+    def _open(self, directory, hwx, load):
+        err = ctypes.create_string_buffer(ERR_BYTES)
+        seconds = ctypes.c_double(0)
+        handle = self.lib.ane_program_open(str(directory).encode(), str(hwx).encode() if hwx else None, 1 if load else 0,
+                                           ctypes.byref(seconds), err, len(err))
+        self.error = err.value.decode(errors="replace")
+        if handle and hwx is None:
+            self.compile_seconds = seconds.value
+        return handle
 
     def __call__(self, inputs, outputs):
         """inputs: {name: Surface} bound in the program's declared order; outputs: [Surface]."""
@@ -221,7 +307,7 @@ class LayerPrograms:
         program.layers = LAYERS_PER_PROGRAM
         if on_progress is not None:
             on_progress(1, 1)
-        self.timing[(S, P)] = {"generate_seconds": gen_s, "compile_seconds": program.compile_seconds}
+        self.timing[(S, P)] = {"generate_seconds": gen_s, "compile_seconds": program.compile_seconds, "route": program.route}
         return [program]
 
 

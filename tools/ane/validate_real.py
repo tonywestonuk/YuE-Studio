@@ -19,7 +19,7 @@ t0 = time.perf_counter()
 solver = runtime.ANEVelocity(engine, model, on_prepare=lambda i, n: print(json.dumps({"prepare_layer": i, "of": n}), flush=True) if i % 7 == 0 else None)
 prep = time.perf_counter() - t0
 print(json.dumps({"song": d, "frames": len(tokens), "S_real": solver.S_real, "S": solver.S, "P_real": solver.P_real, "P": solver.P,
-                  "prepare_s": round(prep), **{k: round(v) for k, v in runtime.programs_for(model).timing[(solver.S, solver.P)].items()}}), flush=True)
+                  "prepare_s": round(prep), **{k: (round(v) if isinstance(v, (int, float)) else v) for k, v in runtime.programs_for(model).timing[(solver.S, solver.P)].items()}}), flush=True)
 try:
     va = solver.velocity(chunk.noise.float(), raw).numpy()
 except Exception as e:

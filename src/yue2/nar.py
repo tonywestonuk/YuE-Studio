@@ -330,7 +330,8 @@ def synthesize(model, prefix: Sequence[int], codec: Sequence[int], seed: int,
             S, P = ane_runtime.buckets_for((len(chunk.noise) + 2, len(chunk.ar_tokens)))
             programs = ane_runtime.programs_for(model)
             if (S, P) not in programs.loaded:
-                phase(f"compiling the Neural Engine program for {S} rows (a few seconds to ~8 minutes, longer for longer songs)")
+                phase(f"compiling the Neural Engine program for {S} rows (the first time for this length: a second to ~15 s, "
+                      f"longer for the longest songs; later launches load it from disk)")
             programs.ensure(S, P, on_progress=on_prepare)
         phase("prefilling the prefix on the GPU")
         with lock:

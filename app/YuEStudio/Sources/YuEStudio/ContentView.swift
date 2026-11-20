@@ -217,7 +217,7 @@ struct ContentView: View {
     private var qualityCaption: String {
         switch qualityMode {
         case "draft-gpu": return "8 solver steps on the GPU: a quick preview of the same song. Render any draft at full quality from its row."
-        case "draft-gpu-ane": return "8 solver steps; the Neural Engine takes songs it can compile (a few seconds to minutes per new length), the GPU the rest."
+        case "draft-gpu-ane": return "8 solver steps; the Neural Engine takes songs it can compile (a few seconds the first time a length is seen; cached after that), the GPU the rest."
         case "full-gpu": return "32 solver steps on the GPU only. Lowest memory: the Neural Engine's 2.8 GB of weights are never mapped. Best choice on 16 GB Macs."
         default: return "32 solver steps; the Neural Engine and the GPU work on queued songs together. Long songs can take an hour or more."
         }
