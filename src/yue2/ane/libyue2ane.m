@@ -2,6 +2,8 @@
  * libyue2ane — minimal C API over the private AppleNeuralEngine in-memory model
  * route (no Core ML). Programs are MIL text + a weight blob; tensors travel in
  * IOSurfaces so layer outputs can feed the next program with no copy.
+ * The route (descriptor, compile/load, IOSurface I/O, the model.mil temp-dir
+ * quirk) follows https://github.com/maderix/ANE.
  *
  * Build: clang -O2 -fobjc-arc -dynamiclib libyue2ane.m -o libyue2ane.dylib \
  *            -framework Foundation -framework IOSurface

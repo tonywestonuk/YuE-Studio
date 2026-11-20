@@ -80,7 +80,9 @@ the extra 7 GB copy pushes the system into swap and multiplies run times.
 
 `yue2.nar.synthesize(engine="ane")` runs the 28 decoder layers of the flow-matching
 solver on the Apple Neural Engine through the private in-memory program API
-(`src/yue2/ane/libyue2ane.m`, built with clang; no Core ML at run time). One
+(`src/yue2/ane/libyue2ane.m`, built with clang; no Core ML at run time; the
+in-memory descriptor, compile/load calls, IOSurface tensors and the on-disk
+`model.mil` quirk follow [maderix/ANE](https://github.com/maderix/ANE)). One
 program per layer per length bucket (S rows in steps of 512, prefix keys P in
 steps of 1024) is generated from the real weights by `src/yue2/ane/mil.py`
 using coremltools offline, cached under `~/.cache/yue2-ane/`, and compiled on

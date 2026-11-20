@@ -39,7 +39,8 @@ Applications, launch it and press Install.
   A song waiting for the Neural Engine can start on the GPU and move across mid-solve.
 - **Neural Engine synthesis** (`src/yue2/ane/`): the flow-matching network compiled to the
   Neural Engine through a private in-memory route, one program per length bucket with the
-  weights bound as inputs. About 2x the GPU on short songs.
+  weights bound as inputs. About 2x the GPU on short songs. The bridge follows the approach
+  of [maderix/ANE](https://github.com/maderix/ANE), which worked out how to drive that route.
 - **MLX synthesis** (`src/yue2/nar_mlx.py`), **batched token decoding** (`src/yue2/batched.py`)
   and a **lean loader** that keeps only the autoregressive path in PyTorch (`src/yue2/lean.py`).
 
